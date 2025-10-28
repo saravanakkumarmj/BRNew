@@ -28,17 +28,17 @@ function parseLangflowResponse(apiResponse: any): any {
 
     console.log("[v0] Found text content, extracting JSON")
 
-    // Remove markdown code block wrapper (```json and ```)
+    // Remove markdown code block wrapper (\`\`\`json and \`\`\`)
     let jsonString = textContent.trim()
 
-    // Remove ```json from the start
+    // Remove \`\`\`json from the start
     if (jsonString.startsWith("```json")) {
       jsonString = jsonString.substring(7)
     } else if (jsonString.startsWith("```")) {
       jsonString = jsonString.substring(3)
     }
 
-    // Remove ``` from the end
+    // Remove \`\`\` from the end
     if (jsonString.endsWith("```")) {
       jsonString = jsonString.substring(0, jsonString.length - 3)
     }
@@ -214,110 +214,111 @@ export function UserForm({ onAnalysisComplete }: UserFormProps) {
     setAnalysisStep("Preparing analysis...")
 
     try {
-      const USE_REAL_API = process.env.NEXT_PUBLIC_USE_MOCK_ANALYSIS !== 'true'
+      console.log("[v0] Making real API call to Langflow")
 
-      let analysisData
+      try {
+        // Bypass upload and directly call analysis API with file path
+        setAnalysisStep("Running AI analysis...")
+        const analysisPayload = {
+          output_type: "text",
+          input_type: "text",
+          input_value: `/Users/saravanakkumar/Downloads/BR1.pdf`, // Direct file path
+          session_id: `session-${Date.now()}`,
+        }
 
-      if (USE_REAL_API) {
-        console.log("[v0] Making real API call to Langflow")
+        console.log("[v0] Running analysis with file content directly")
 
-        try {
-          // Bypass upload and directly call analysis API with file path
-          setAnalysisStep("Running AI analysis...")
-          const analysisPayload = {
-            output_type: "text",
-            input_type: "text", 
-            input_value: `/Users/saravanakkumar/Downloads/BR1.pdf`, // Direct file path
-            session_id: `session-${Date.now()}`
-          }
-
-          console.log("[v0] Running analysis with file content directly")
-
-          const analysisResponse = await fetch("/api/langflow-proxy?action=analyze&flowId=5c1a9317-33be-49de-88b9-f063edefc713", {
+        const analysisResponse = await fetch(
+          "/api/langflow-proxy?action=analyze&flowId=5c1a9317-33be-49de-88b9-f063edefc713",
+          {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify(analysisPayload),
-          })
+          },
+        )
 
         if (!analysisResponse.ok) {
           const errorData = await analysisResponse.json().catch(() => ({ error: "Analysis failed" }))
           console.error("[v0] Analysis error details:", errorData)
-          
-          // Handle specific encoding errors with fallback to mock data
+
           const errorMessage = errorData.error || errorData.message || ""
           console.log("[v0] Error message to check:", errorMessage)
-          
-          console.log("[v0] Error doesn't match encoding patterns, throwing error")
+
           throw new Error(errorData.error || errorData.message || "Failed to analyze report")
-        } else {
-          const result = await analysisResponse.json()
-          console.log("[v0] Langflow analysis response:", JSON.stringify(result, null, 2))
-          
-          // Parse the Langflow response using the proper extraction method
-          setAnalysisStep("Processing results...")
-          analysisData = parseLangflowResponse(result)
-          console.log("[v0] Real API analysis completed successfully")
         }
-        } catch (apiError) {
-          console.error("[v0] API call failed:", apiError)
-          
-          // Re-throw the error to be handled by the main catch block
-          throw apiError
+
+        const result = await analysisResponse.json()
+        console.log("[v0] Langflow analysis response:", JSON.stringify(result, null, 2))
+
+        // Parse the Langflow response using the proper extraction method
+        setAnalysisStep("Processing results...")
+        const analysisData = parseLangflowResponse(result)
+        console.log("[v0] Real API analysis completed successfully")
+
+        const analysisResult: AnalysisResult = {
+          userMetadata: {
+            fullName: formData.name,
+            age: formData.age,
+            healthGoal: formData.healthGoal,
+          },
+          summary: analysisData.blood_report_interpretation?.summary || "Analysis completed successfully.",
+          keyFindings: (analysisData.blood_report_interpretation?.key_findings || []).map((finding: any) => ({
+            test_name: finding.test_name || "Unknown Test",
+            value: finding.value || "N/A",
+            status: finding.status || "unknown",
+            description: finding.description || "No description available",
+          })),
+          abnormalFindings: (analysisData.abnormal_findings || []).map((finding: any) => ({
+            test_name: finding.test_name || "Unknown Test",
+            current_value: finding.current_value || "N/A",
+            reference_range: finding.reference_range || "N/A",
+            significance: finding.significance || "No significance data available",
+          })),
+          recommendedSupplements: (analysisData.recommended_supplements || []).map((supplement: any) => ({
+            name: supplement.name || "Unknown Supplement",
+            dosage: supplement.dosage || "Consult healthcare provider",
+            rationale: supplement.rationale || "No rationale provided",
+          })),
+          lifestyleRecommendations: {
+            diet: analysisData.lifestyle_recommendations?.diet || {
+              items: [],
+              description: "No diet recommendations available",
+            },
+            exercise: analysisData.lifestyle_recommendations?.exercise || {
+              items: [],
+              description: "No exercise recommendations available",
+            },
+            stress_management: analysisData.lifestyle_recommendations?.stress_management || {
+              items: [],
+              description: "No stress management recommendations available",
+            },
+            sleep: analysisData.lifestyle_recommendations?.sleep || {
+              items: [],
+              description: "No sleep recommendations available",
+            },
+          },
+          disclaimer:
+            analysisData.important_disclaimer ||
+            "Please consult with your healthcare provider for personalized medical advice.",
+          rawAnalysis: JSON.stringify(analysisData, null, 2),
         }
-      } else {
-        console.log("[v0] Using mock data to display formatted results")
 
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-
-        analysisData = MOCK_API_RESPONSE
-        console.log("[v0] Mock analysis completed successfully")
+        onAnalysisComplete(analysisResult)
+      } catch (apiError) {
+        console.error("[v0] API call failed:", apiError)
+        throw apiError
       }
-
-      const analysisResult: AnalysisResult = {
-        userMetadata: {
-          fullName: formData.name,
-          age: formData.age,
-          healthGoal: formData.healthGoal,
-        },
-        summary: analysisData.blood_report_interpretation?.summary || "Analysis completed successfully.",
-        keyFindings: (analysisData.blood_report_interpretation?.key_findings || []).map((finding: any) => ({
-          test_name: finding.test_name || "Unknown Test",
-          value: finding.value || "N/A",
-          status: finding.status || "unknown",
-          description: finding.description || "No description available",
-        })),
-        abnormalFindings: (analysisData.abnormal_findings || []).map((finding: any) => ({
-          test_name: finding.test_name || "Unknown Test",
-          current_value: finding.current_value || "N/A",
-          reference_range: finding.reference_range || "N/A",
-          significance: finding.significance || "No significance data available",
-        })),
-        recommendedSupplements: (analysisData.recommended_supplements || []).map((supplement: any) => ({
-          name: supplement.name || "Unknown Supplement",
-          dosage: supplement.dosage || "Consult healthcare provider",
-          rationale: supplement.rationale || "No rationale provided",
-        })),
-        lifestyleRecommendations: {
-          diet: analysisData.lifestyle_recommendations?.diet || { items: [], description: "No diet recommendations available" },
-          exercise: analysisData.lifestyle_recommendations?.exercise || { items: [], description: "No exercise recommendations available" },
-          stress_management: analysisData.lifestyle_recommendations?.stress_management || { items: [], description: "No stress management recommendations available" },
-          sleep: analysisData.lifestyle_recommendations?.sleep || { items: [], description: "No sleep recommendations available" },
-        },
-        disclaimer: analysisData.important_disclaimer || "Please consult with your healthcare provider for personalized medical advice.",
-        rawAnalysis: JSON.stringify(analysisData, null, 2),
-      }
-
-      onAnalysisComplete(analysisResult)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred. Please try again."
       console.error("[v0] Error during analysis:", error)
-      
+
       // Handle encoding errors with proper error message
       if (errorMessage.includes("utf-8 codec can't decode") || errorMessage.includes("invalid continuation byte")) {
-        setError("The PDF file contains characters that cannot be processed by the analysis system. Please try with a different PDF file that contains only standard text characters.")
+        setError(
+          "The PDF file contains characters that cannot be processed by the analysis system. Please try with a different PDF file that contains only standard text characters.",
+        )
       } else if (errorMessage.includes("Analysis failed")) {
         setError("Analysis failed. Please check your Langflow flow configuration and try again.")
       } else {
